@@ -1,0 +1,357 @@
+# Transformer 기반 음악 추천 시스템 - 최종 데이터베이스 스키마
+
+## 개요
+- **웹사이트**: 사용자 인증, 곡 검색, 좋아요/플레이리스트 관리
+- **Spotify API**: 곡 정보 및 audio features 실시간 조회
+- **Transformer 모델**: 사용자 취향 + 선택 곡 고려하여 상위 5개 곡 추천
+- **나라 필터링**: 한국, 영국, 미국, 일본
+
+---
+
+## 테이블 1: users (사용자 프로필)
+**목적**: 사용자 기본 정보 저장
+
+| 컬럼명 | 데이터 타입 | 설명 |
+|--------|-----------|------|
+| id | INTEGER (Primary Key) | 사용자 고유 번호 |
+| username | TEXT (UNIQUE) | 로그인 아이디 |
+| password_hash | TEXT | 비밀번호 해시 |
+| nickname | TEXT | 닉네임 |
+| age | INTEGER | 나이 |
+| gender | TEXT | 성별 (male/female) |
+| created_at | TIMESTAMP | 가입 시간 |
+
+**예시**:
+```
+id=1, username=user1, nickname=철수, age=13, gender=male
+id=2, username=user2, nickname=영희, age=11, gender=female
+```
+
+---
+
+## 테이블 2: likes (사용자 좋아요)
+**목적**: 사용자가 좋아요한 곡 기록
+
+| 컬럼명 | 데이터 타입 | 설명 |
+|--------|-----------|------|
+| like_id | INTEGER (Primary Key) | 좋아요 고유 번호 |
+| user_id | INTEGER (Foreign Key) | 사용자 ID (users 참조) |
+| track_id | TEXT | Spotify 곡 ID |
+| liked_at | TIMESTAMP | 좋아요 시간 |
+
+**예시**:
+```
+like_id=1, user_id=1, track_id=3n3nW6NJQ0N8DZbmrI6IIK, liked_at=2024-10-20 14:30:00
+like_id=2, user_id=1, track_id=7qiZfU4dY1lsylvNEprXGK, liked_at=2024-10-21 10:15:00
+```
+
+**용도**: Transformer 모델이 사용자의 선호 패턴 학습
+
+---
+
+## 테이블 3: playlists (사용자 플레이리스트)
+**목적**: 사용자가 만든 플레이리스트 정보
+
+| 컬럼명 | 데이터 타입 | 설명 |
+|--------|-----------|------|
+| playlist_id | INTEGER (Primary Key) | 플레이리스트 고유 번호 |
+| user_id | INTEGER (Foreign Key) | 사용자 ID (users 참조) |
+| playlist_name | TEXT | 플레이리스트 이름 |
+| created_at | TIMESTAMP | 생성 시간 |
+| updated_at | TIMESTAMP | 마지막 수정 시간 |
+
+**예시**:
+```
+playlist_id=1, user_id=1, playlist_name=운동할 때, created_at=2024-10-15 12:00:00
+playlist_id=2, user_id=1, playlist_name=잠자기 전, created_at=2024-10-16 18:30:00
+```
+
+**용도**: 플레이리스트에 속한 곡들의 특성을 통해 사용자 취향 파악
+
+---
+
+## 테이블 4: playlist_tracks (플레이리스트-곡 연결)
+**목적**: 플레이리스트에 속한 곡들 기록 (다대다 관계)
+
+| 컬럼명 | 데이터 타입 | 설명 |
+|--------|-----------|------|
+| pt_id | INTEGER (Primary Key) | 고유 번호 |
+| playlist_id | INTEGER (Foreign Key) | 플레이리스트 ID |
+| track_id | TEXT | Spotify 곡 ID |
+| added_at | TIMESTAMP | 곡이 추가된 시간 |
+| position | INTEGER | 플레이리스트 내 순서 |
+
+**예시**:
+```
+pt_id=1, playlist_id=1, track_id=3n3nW6NJQ0N8DZbmrI6IIK, position=1
+pt_id=2, playlist_id=1, track_id=7qiZfU4dY1lsylvNEprXGK, position=2
+```
+
+**용도**: 플레이리스트의 곡들 정보 조회 및 모델 학습
+
+---
+
+## 테이블 5: tracks (곡 정보 캐시)
+**목적**: Spotify API에서 가져온 곡 정보 캐시
+
+| 컬럼명 | 데이터 타입 | 설명 |
+|--------|-----------|------|
+| track_id | TEXT (Primary Key) | Spotify 곡 ID |
+| track_name | TEXT | 곡 제목 |
+| artist_name | TEXT | 아티스트 이름 |
+| market | TEXT | 나라 코드 (KR/GB/US/JP) |
+| popularity | INTEGER | Spotify 인기도 (0-100) |
+| fetched_at | TIMESTAMP | API 조회 시간 |
+
+**예시**:
+```
+track_id=3n3nW6NJQ0N8DZbmrI6IIK, track_name=Blinding Lights, artist_name=The Weeknd, market=US
+track_id=7qiZfU4dY1lsylvNEprXGK, track_name=As It Was, artist_name=Harry Styles, market=GB
+```
+
+**용도**: 
+- 곡 검색 시 반복 API 호출 방지
+- 사용자에게 곡 정보 표시
+
+---
+
+## 테이블 6: audio_features (음향 특성)
+**목적**: 각 곡의 Spotify audio features 캐시
+
+| 컬럼명 | 데이터 타입 | 설명 |
+|--------|-----------|------|
+| feature_id | INTEGER (Primary Key) | 고유 번호 |
+| track_id | TEXT (Foreign Key) | Spotify 곡 ID (tracks 참조) |
+| danceability | REAL | 춤을 추기 좋은 정도 (0~1) |
+| energy | REAL | 에너지 레벨 (0~1) |
+| valence | REAL | 긍정성/행복도 (0~1) |
+| tempo | REAL | 박자 (BPM) |
+| acousticness | REAL | 어쿠스틱 정도 (0~1) |
+| instrumentalness | REAL | 악기음 정도 (0~1) |
+| liveness | REAL | 라이브 느낌 (0~1) |
+| speechiness | REAL | 보컬/스피치 정도 (0~1) |
+| loudness | REAL | 음량 (dB) |
+| fetched_at | TIMESTAMP | API 조회 시간 |
+
+**예시**:
+```
+feature_id=1, track_id=3n3nW6NJQ0N8DZbmrI6IIK, 
+danceability=0.73, energy=0.81, valence=0.65, tempo=127.0, ...
+
+feature_id=2, track_id=7qiZfU4dY1lsylvNEprXGK,
+danceability=0.68, energy=0.85, valence=0.72, tempo=174.0, ...
+```
+
+**용도**: **Transformer 모델의 입력으로 사용** (가장 중요)
+
+---
+
+## 테이블 관계도
+
+```
+┌─────────────────┐
+│     users       │
+├─────────────────┤
+│ id (PK)         │
+│ username        │
+│ password_hash   │
+│ nickname        │
+│ age             │
+│ gender          │
+│ created_at      │
+└────────┬────────┘
+         │ (1:N)
+         │
+    ┌────┴─────────┬──────────────┐
+    │              │              │
+    ▼              ▼              ▼
+┌─────────┐  ┌──────────┐  ┌────────────┐
+│ likes   │  │playlists │  │playlist_   │
+├─────────┤  ├──────────┤  │tracks      │
+│like_id  │  │playlist_ │  ├────────────┤
+│user_id  │  │id (PK)   │  │pt_id (PK)  │
+│track_id─┼──┼─────────→│  │playlist_id │
+│liked_at │  │user_id   │  │track_id────┼──┐
+└────┬────┘  │playlist_ │  │added_at    │  │
+     │       │name      │  │position    │  │
+     │       │created_at│  └────────────┘  │
+     │       │updated_at│                  │
+     │       └────┬─────┘                  │
+     │            │                       │
+     └────────────┼───────────────────────┘
+                  │
+                  ▼
+          ┌──────────────┐
+          │   tracks     │
+          ├──────────────┤
+          │track_id (PK) │
+          │track_name    │
+          │artist_name   │
+          │market        │
+          │popularity    │
+          │fetched_at    │
+          └──────┬───────┘
+                 │ (1:1)
+                 │
+                 ▼
+          ┌──────────────────┐
+          │ audio_features   │
+          ├──────────────────┤
+          │feature_id (PK)   │
+          │track_id (FK)     │
+          │danceability      │
+          │energy            │
+          │valence           │
+          │tempo             │
+          │acousticness      │
+          │instrumentalness  │
+          │liveness          │
+          │speechiness       │
+          │loudness          │
+          │fetched_at        │
+          └──────────────────┘
+```
+
+---
+
+## 데이터 흐름
+
+### 1. 곡 검색 흐름
+```
+사용자 검색 입력
+    ↓
+Spotify API 호출 (market=KR/GB/US/JP)
+    ↓
+tracks 테이블에 캐시 저장
+audio_features 테이블에 audio features 저장
+    ↓
+사용자에게 검색 결과 표시
+```
+
+### 2. 좋아요/플레이리스트 추가 흐름
+```
+사용자가 곡에 좋아요 또는 플레이리스트에 추가
+    ↓
+likes 테이블 또는 playlist_tracks 테이블에 저장
+    ↓
+다음 모델 학습/가중치 조정 시 사용됨
+```
+
+### 3. 추천 흐름
+```
+사용자가 곡 1개 선택 + "추천 받기" 클릭
+    ↓
+사용자의 취향 데이터 수집:
+  - likes 테이블의 모든 곡들의 audio_features
+  - playlists의 모든 곡들의 audio_features
+  - 현재 선택한 곡의 audio_features
+    ↓
+Transformer 모델에 입력
+    ↓
+스포티파이 (KR/GB/US/JP) 곡들에 대해
+모델이 점수 계산
+    ↓
+상위 5개 곡 반환 + 사용자에게 표시
+```
+
+---
+
+## 구현 시 주의사항
+
+1. **캐싱**: tracks와 audio_features는 한 번 저장하면 반복 호출 방지
+2. **market 필터링**: Spotify API 호출 시 항상 market 파라미터 설정
+3. **타임스탬프**: fetched_at으로 데이터 업데이트 주기 관리 가능
+4. **Foreign Key**: 데이터 무결성 유지
+5. **인덱싱**: user_id, track_id에 인덱스 추가 (빠른 조회)
+
+---
+
+## SQL 생성 스크립트 예시
+
+```sql
+-- users 테이블 (이미 존재)
+CREATE TABLE users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    nickname TEXT,
+    age INTEGER,
+    gender TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- likes 테이블
+CREATE TABLE likes (
+    like_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    track_id TEXT NOT NULL,
+    liked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- playlists 테이블
+CREATE TABLE playlists (
+    playlist_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    playlist_name TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+-- playlist_tracks 테이블
+CREATE TABLE playlist_tracks (
+    pt_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    playlist_id INTEGER NOT NULL,
+    track_id TEXT NOT NULL,
+    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    position INTEGER,
+    FOREIGN KEY (playlist_id) REFERENCES playlists(playlist_id)
+);
+
+-- tracks 테이블
+CREATE TABLE tracks (
+    track_id TEXT PRIMARY KEY,
+    track_name TEXT NOT NULL,
+    artist_name TEXT NOT NULL,
+    market TEXT NOT NULL,
+    popularity INTEGER,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- audio_features 테이블
+CREATE TABLE audio_features (
+    feature_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    track_id TEXT NOT NULL UNIQUE,
+    danceability REAL,
+    energy REAL,
+    valence REAL,
+    tempo REAL,
+    acousticness REAL,
+    instrumentalness REAL,
+    liveness REAL,
+    speechiness REAL,
+    loudness REAL,
+    fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (track_id) REFERENCES tracks(track_id)
+);
+
+-- 인덱스 추가
+CREATE INDEX idx_likes_user_id ON likes(user_id);
+CREATE INDEX idx_playlists_user_id ON playlists(user_id);
+CREATE INDEX idx_playlist_tracks_playlist_id ON playlist_tracks(playlist_id);
+CREATE INDEX idx_audio_features_track_id ON audio_features(track_id);
+```
+
+---
+
+## 정리
+
+이 스키마로 다음이 가능합니다:
+
+✓ 사용자 인증 및 프로필 관리
+✓ 곡 검색 및 캐싱
+✓ 좋아요/플레이리스트 관리
+✓ Transformer 모델 학습 데이터 제공
+✓ 나라별 필터링 (KR/GB/US/JP)
+✓ 효율적인 추천 시스템 운영
